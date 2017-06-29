@@ -1,8 +1,10 @@
 const doWhilst = require('async/doWhilst');
 const waterfall = require('async/waterfall');
+const moment = require('moment');
 const prompt = require('prompt');
-const timestamp = require('unix-timestamp');
 const request = require('request');
+
+const dotenv = require('dotenv').config();
 
 const slackApi = 'https://slack.com/api';
 
@@ -12,6 +14,10 @@ let page = 1;
 let pages = null;
 let members = [];
 let sizeTotal = 0;
+const aMonthAgo = moment().subtract(30, 'days');
+
+const fileIdsToDelete = [];
+let sizeTotalToDelete = 0;
 
 prompt.get(['token'], (err, result) => {
   if (err) {
@@ -19,7 +25,7 @@ prompt.get(['token'], (err, result) => {
     return;
   }
 
-  const token = result.token;
+  const token = result.token.length > 0 ? result.token : process.env.TOKEN;
   if (!token) {
     console.error('No token!');
     return;
@@ -58,8 +64,9 @@ prompt.get(['token'], (err, result) => {
                   pages = body.paging.pages;
                 }
 
-                body.files.forEach(file => {
+                body.files.forEach((file, index) => {
                   const member = getMemberById(file.user);
+                  const createdAt = moment(file.created, 'X');
 
                   sizeTotal += file.size;
 
@@ -70,8 +77,12 @@ prompt.get(['token'], (err, result) => {
                     member.privateSize += file.size;
                     member.privateCount++;
                   }
-                });
 
+                  if (createdAt.isBefore(aMonthAgo)) {
+                    fileIdsToDelete.push(file.id);
+                    sizeTotalToDelete += file.size;
+                  }
+                });
                 page++;
                 callbackWhilst(null);
               }
@@ -99,17 +110,41 @@ prompt.get(['token'], (err, result) => {
         members.map(member => {
           if (member.size > 0) {
             delete member.id;
-            member.size = (member.size / (1024 * 1024)).toFixed(2);
-            member.privateSize = (member.privateSize / (1024 * 1024)).toFixed(
-              2
-            );
+            member.size = bytesToMb(member.size);
+            member.privateSize = bytesToMb(member.privateSize);
             return member;
           } else {
             return null;
           }
         })
       );
-      console.log((sizeTotal / (1024 * 1024)).toFixed(2));
+      console.log(`Current total file sizes: ${bytesToMb(sizeTotal)} MB`);
+      console.log(`Total ${bytesToMb(sizeTotalToDelete)} MB to be deleted...`);
+
+      prompt.get(
+        [
+          {
+            name: 'delete',
+            description: 'Delete 30-or-more-day-old files? (Y, n)'
+          }
+        ],
+        (err, result) => {
+          if (result.delete === 'Y') {
+            fileIdsToDelete.forEach((fileId, index) => {
+              request.post(
+                `${slackApi}/files.delete?token=${token}&file=${fileId}`,
+                (err, res, body) => {
+                  if (res.statusCode === 200) {
+                    console.log(`${fileId} successfully deleted.`);
+                  } else {
+                    console.log(`Error: ${fileId} not deleted.`);
+                  }
+                }
+              );
+            });
+          }
+        }
+      );
     }
   );
 });
@@ -117,4 +152,8 @@ prompt.get(['token'], (err, result) => {
 const getMemberById = id => {
   const membersFiltered = members.filter(member => member.id == id);
   return membersFiltered.length > 0 ? membersFiltered[0] : null;
+};
+
+const bytesToMb = bytes => {
+  return parseFloat((bytes / (1024 * 1024)).toFixed(2));
 };

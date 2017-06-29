@@ -14,8 +14,9 @@
   "license": "ISC",
   "dependencies": {
     "async": "^2.1.4",
+    "dotenv": "^4.0.0",
+    "moment": "^2.18.1",
     "prompt": "^1.0.0",
-    "request": "^2.79.0",
-    "unix-timestamp": "^0.2.0"
+    "request": "^2.79.0"
   }
 }
